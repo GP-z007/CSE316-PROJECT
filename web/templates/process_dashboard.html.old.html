@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Process Monitor · CSE316</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#dfe3e8;--panel:#eceff3;--line:#cbd1d9;--line2:#dde1e7;--text:#1b1f27;--dim:#5f6877;--faint:#8a93a1;
+  --bar:#1f2733;--bar-text:#e7eaf0;--bar-dim:#8d97a8;--accent:#2f5fd0;--sel:#d9e3f6;
+  --ok:#1f8a4c;--warn:#b7791f;--bad:#c53030;--blue:#2f5fd0;--grey:#7a8392;
+  --sans:"DM Sans",system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  --left-pane:calc(100% - 350px);--vnc-pane:44%;--pcb-pane:184px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--text);font:13px/1.4 var(--sans);display:flex;flex-direction:column}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+.mono{font-family:var(--mono);font-size:12px}
+
+/* top bar */
+header{flex:0 0 44px;background:var(--bar);color:var(--bar-text);display:flex;align-items:center;gap:20px;padding:0 16px}
+header h1{font-size:14px;font-weight:600;white-space:nowrap}
+header h1 span{color:var(--bar-dim);font-weight:400;margin-left:8px}
+.stats{display:flex;gap:18px;margin-left:8px}
+.stats div{font-size:12px;color:var(--bar-dim);white-space:nowrap}
+.stats b{color:var(--bar-text);font-weight:600;margin-left:5px;font-family:var(--mono)}
+.stats b.warn{color:#f0b429}.stats b.bad{color:#ff7b72}
+.sp{flex:1}
+header input{height:28px;width:210px;padding:0 10px;background:#2b3442;border:1px solid #3a4557;border-radius:3px;color:var(--bar-text);outline:0;font-size:12.5px}
+header input:focus{border-color:#6c8ee6}
+header input::placeholder{color:#7b8596}
+header button{height:28px;padding:0 12px;background:#2b3442;border:1px solid #3a4557;border-radius:3px;font-size:12.5px;color:var(--bar-text);line-height:1}
+.sel-wrap{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--bar-dim)}
+.sel-wrap select{appearance:none;-webkit-appearance:none;height:28px;min-width:64px;padding:0 24px 0 10px;background:#2b3442 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238d97a8' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 8px center;border:1px solid #3a4557;border-radius:3px;font-size:12.5px;line-height:26px;color:var(--bar-text);cursor:pointer;outline:0}
+.sel-wrap select:focus{border-color:#6c8ee6}
+header button:hover{background:#344054}
+
+/* layout */
+#app{flex:1;min-height:0;display:grid;grid-template-columns:minmax(420px,var(--left-pane)) 8px minmax(300px,1fr)}
+#left,#right{display:flex;flex-direction:column;min-height:0;min-width:0}
+#left{border-right:1px solid var(--line)}
+.resizer{position:relative;z-index:4;flex:none;background:var(--line2);touch-action:none;transition:background .15s}
+.resizer::after{content:"";position:absolute;opacity:.7}
+.resizer:hover,.resizer.dragging{background:#b8c2d0}
+#main-resizer{cursor:col-resize}
+#main-resizer::after{inset:calc(50% - 16px) 2px;background:repeating-linear-gradient(to bottom,var(--grey) 0 2px,transparent 2px 5px)}
+.ph{flex:0 0 auto;display:flex;align-items:center;gap:10px;height:32px;padding:0 12px;background:#e3e7ec;border-bottom:1px solid var(--line);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+.ph .sp{flex:1}
+.ph small{font-weight:400;text-transform:none;letter-spacing:0;color:var(--faint);font-size:12px}
+.ph button{height:22px;padding:0 8px;border:1px solid var(--line);border-radius:3px;background:var(--panel);font-size:11.5px;font-weight:500;text-transform:none;letter-spacing:0;color:var(--text)}
+.ph button:hover{background:var(--bg)}
+
+/* vnc */
+#vnc{flex:0 0 var(--vnc-pane);display:flex;flex-direction:column;min-height:160px;background:var(--panel)}
+.vwrap{flex:1;min-height:0;position:relative;background:#1b1d22}
+.vwrap p{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#7b8596;font-size:12.5px}
+.vwrap iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:transparent}
+#vnc-resizer{height:8px;cursor:row-resize;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+#vnc-resizer::after{inset:2px calc(50% - 16px);background:repeating-linear-gradient(to right,var(--grey) 0 2px,transparent 2px 5px)}
+
+/* process table */
+#procs{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--panel)}
+.filters{display:flex;gap:2px}
+.filters button{border:0;background:none;height:22px;padding:0 9px;border-radius:3px;font-size:12px;text-transform:none;letter-spacing:0;font-weight:500;color:var(--dim)}
+.filters button:hover{background:var(--line2)}
+.filters button.on{background:var(--sel);color:var(--accent)}
+.tw{flex:1;min-height:0;overflow:auto}
+table{width:100%;border-collapse:collapse}
+th{position:sticky;top:0;background:var(--panel);text-align:left;font-size:11.5px;font-weight:600;color:var(--dim);padding:6px 10px;border-bottom:1px solid var(--line);cursor:pointer;white-space:nowrap;user-select:none}
+th:hover{color:var(--text)}
+th.r,td.r{text-align:right}
+td{padding:4px 10px;border-bottom:1px solid var(--line2);white-space:nowrap}
+tr.p{cursor:pointer}
+tr.p:hover td{background:#e4e8ee}
+tr.p.sel td{background:var(--sel)}
+td.n{max-width:200px;overflow:hidden;text-overflow:ellipsis}
+.s{display:inline-flex;align-items:center;gap:6px}
+.s i{width:7px;height:7px;border-radius:50%}
+.bg{display:inline-block;width:40px;height:5px;background:var(--line2);margin-right:7px;vertical-align:middle}
+.bg i{display:block;height:100%;background:var(--blue)}
+.hi{color:var(--bad);font-weight:600}.md{color:var(--warn);font-weight:600}
+.empty{padding:24px 12px;color:var(--faint);text-align:center}
+
+/* right column */
+#right{background:var(--panel)}
+.chart{flex:0 0 auto;border-bottom:1px solid var(--line)}
+.chart>.ph{height:32px}
+.chart .plot{height:104px;padding:8px 10px 10px;background:#f5f7f9}
+.chart canvas{width:100%;height:100%;display:block}
+.states{flex:0 0 auto;padding:10px 12px;border-bottom:1px solid var(--line)}
+.stack{display:flex;height:8px;background:var(--line2);margin-bottom:8px}
+.stack i{display:block;height:100%}
+.lg{display:grid;grid-template-columns:1fr 1fr;gap:3px 16px;font-size:12px}
+.lg div{display:flex;align-items:center;gap:6px}
+.lg i{width:7px;height:7px;border-radius:50%}
+.lg b{margin-left:auto;font-family:var(--mono);font-weight:500}
+#pcb-box{flex:0 0 var(--pcb-pane);min-height:0;display:flex;flex-direction:column}
+.pcb{flex:1;min-height:0;overflow:hidden;padding:8px 12px 10px;display:flex;flex-direction:column}
+.kvg{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px}
+.kv{min-width:0;font-size:12.5px}
+.kv.full{grid-column:1/-1}
+.kv>span:first-child{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);margin-bottom:1px}
+.kv>span:last-child{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.acts{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:auto;padding-top:10px}
+.acts button{height:30px;border:1px solid var(--line);border-radius:3px;background:var(--panel);font-size:12px;font-weight:500}
+.acts button:hover{background:var(--bg)}
+.acts .d{color:var(--bad)}.acts .d:hover{border-color:var(--bad);background:#f1e0e0}
+#iss{flex:1 1 auto;min-height:148px;display:flex;flex-direction:column}
+#side-resizer{height:8px;cursor:row-resize;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+#side-resizer::after{inset:2px calc(50% - 16px);background:repeating-linear-gradient(to right,var(--grey) 0 2px,transparent 2px 5px)}
+.list{flex:1;overflow:auto}
+.it{display:flex;gap:8px;padding:5px 12px;border-bottom:1px solid var(--line2);font-size:12px}
+.it i{width:6px;height:6px;border-radius:50%;margin-top:6px;flex:none}
+.it small{color:var(--faint);margin-left:4px}
+
+footer{flex:0 0 24px;background:#d6dbe2;border-top:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:0 14px;font-size:11.5px;color:var(--dim)}
+footer .sp{flex:1}
+#toast{position:fixed;right:372px;bottom:36px;background:var(--bar);color:var(--bar-text);padding:8px 12px;border-radius:3px;font-size:12px;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.on{opacity:1}
+body.resizing{cursor:default;user-select:none}
+body.resizing-col{cursor:col-resize}
+body.resizing-row{cursor:row-resize}
+@media(max-width:760px){
+  header{gap:10px;padding:0 10px}.stats{display:none}header input{width:150px}
+  #app{grid-template-columns:minmax(300px,1fr) 8px minmax(260px,40%)}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Process Monitor<span>CSE316 · Operating Systems</span></h1>
+  <div class="stats">
+    <div>CPU<b id="s-cpu">–</b></div>
+    <div>Memory<b id="s-mem">–</b></div>
+    <div>Processes<b id="s-proc">–</b></div>
+    <div>Threads<b id="s-thr">–</b></div>
+    <div>Alerts<b id="s-al">0</b></div>
+  </div>
+  <div class="sp"></div>
+  <input id="q" placeholder="Filter by PID, name, user…  Ctrl+K"/>
+  <label class="sel-wrap">Refresh<select id="rate"><option value="1000">1 sec</option><option value="2000" selected>2 sec</option><option value="5000">5 sec</option></select></label>
+  <button id="pause">Pause</button>
+</header>
+
+<div id="app">
+  <div id="left">
+    <section id="vnc">
+      <div class="ph">KasmVNC console <small id="vnc-host"></small><span class="sp"></span><button id="v-tab">Open in new tab</button><button id="v-reload">Reload</button><button id="v-fs">Fullscreen</button></div>
+      <div class="vwrap"><p>Connecting to KasmVNC…</p><iframe id="vf" title="KasmVNC console"></iframe></div>
+    </section>
+    <div class="resizer" id="vnc-resizer" role="separator" aria-label="Resize KasmVNC console" aria-orientation="horizontal"></div>
+    <section id="procs">
+      <div class="ph">Processes <small id="shown"></small><span class="sp"></span><div class="filters" id="seg"></div></div>
+      <div class="tw"><table><thead><tr id="thead"></tr></thead><tbody id="tb"></tbody></table></div>
+    </section>
+  </div>
+
+  <div class="resizer" id="main-resizer" role="separator" aria-label="Resize dashboard panels" aria-orientation="vertical"></div>
+
+  <aside id="right">
+    <div class="chart"><div class="ph">CPU usage <small id="c-cpu-label">last 2 min</small></div><div class="plot"><canvas id="c-cpu"></canvas></div></div>
+    <div class="chart"><div class="ph">Memory usage <small id="c-mem-label">last 2 min</small></div><div class="plot"><canvas id="c-mem"></canvas></div></div>
+    <div class="states"><div class="stack" id="stack"></div><div class="lg" id="lg"></div></div>
+    <div id="pcb-box"><div class="ph">Process control block <span class="sp"></span><small id="pcb-tag"></small></div><div class="pcb" id="pcb"></div></div>
+    <div class="resizer" id="side-resizer" role="separator" aria-label="Resize process control block and issues" aria-orientation="horizontal"></div>
+    <div id="iss"><div class="ph">Issues <span class="sp"></span><small id="al-n">0</small></div><div class="list" id="alerts"></div></div>
+  </aside>
+</div>
+
+<footer><span id="last">Ready</span><span class="sp"></span><span id="conn">Connecting</span><span id="clock" class="mono"></span></footer>
+<div id="toast"></div>
+
+<script>
+(()=>{
+const VNC_URL='https://192.168.64.35:8444/vnc.html?autoconnect=true&resize=scale&reconnect=true';
+const API='/api/processes/',ACT='/api/manage_process/',HIST=60;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const STATES=[['running','Running','#1f8a4c'],['sleeping','Sleeping','#2f5fd0'],['stopped','Stopped','#b7791f'],['zombie','Zombie','#c53030']];
+const COLS=[['pid','PID'],['ppid','PPID'],['name','Name'],['user','User'],['state','State'],['nice','Nice','r'],['threads','Threads','r'],['cpu','CPU %','r'],['mem','Memory','r']];
+let procs=[],sys={},demo=false,paused=false,sel=null,sortK='cpu',sortD=-1,filt='all',timer,rate=2000,flagged=new Set(),alerts=[];
+const cpuH=[],memH=[];
+
+const st=s=>{s=String(s||'').toLowerCase();if(s[0]==='z')return'zombie';if(s.startsWith('stop')||s==='t'||s.startsWith('trac'))return'stopped';if(s==='running'||s==='r')return'running';return'sleeping'};
+const norm=p=>({pid:+p.pid,ppid:p.ppid??p.parent_pid??'—',name:p.name||'?',user:p.username||'—',state:st(p.status),
+  nice:p.nice??p.priority??'—',threads:+p.num_threads||1,cpu:+p.cpu_percent||0,mem:+p.memory_mb||0,memp:+p.memory_percent||0,cmd:p.cmdline||p.name||''});
+const fmtMb=m=>m<1024?m.toFixed(0)+' MB':(m/1024).toFixed(1)+' GB';
+const cap=s=>s[0].toUpperCase()+s.slice(1);
+
+/* simulated data, only used when the backend is unreachable */
+const names=['systemd','sshd','nginx','postgres','python3','node','java','chrome','code','docker','cron','bash','redis-server','gnome-shell','Xorg','pulseaudio','dbus-daemon','NetworkManager','containerd','gcc','make','vim','top','mysqld','apache2'];
+const users=['root','root','www-data','postgres','student','student','root','student'];
+let dm=null;
+function demoTick(){
+  if(!dm){dm=Array.from({length:48},(_,i)=>({pid:100+i*37,ppid:i<3?0:1+(i*7)%20,name:names[i%names.length],username:users[i%users.length],status:'sleeping',
+    cpu_percent:Math.random()*4,memory_mb:20+Math.random()*600,memory_percent:0,num_threads:1+i%9,nice:i%11===0?-5:0,cmdline:'/usr/bin/'+names[i%names.length]+' --daemon'}));dm[4].status='zombie';dm[9].status='stopped'}
+  dm.forEach((p,i)=>{if(p.status==='zombie'||p.status==='stopped'){p.cpu_percent=0;return}
+    p.cpu_percent=Math.max(0,p.cpu_percent*.7+Math.random()*(i%13===0?30:5));p.status=p.cpu_percent>2?'running':'sleeping';
+    p.memory_mb=Math.max(8,p.memory_mb+(Math.random()-.5)*8);p.memory_percent=p.memory_mb/160});
+  const used=dm.reduce((a,p)=>a+p.memory_mb,0)+3000;
+  return{system:{cpu_percent:Math.min(100,dm.reduce((a,p)=>a+p.cpu_percent,0)/4),memory_percent:used/163.84,memory_used_mb:used,memory_total_mb:16384},processes:dm.map(p=>({...p}))};
+}
+
+/* charts */
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function line(c,data,color){
+  const d=devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;if(!w||!h)return;c.width=w*d;c.height=h*d;
+  const x=c.getContext('2d');x.scale(d,d);x.clearRect(0,0,w,h);x.font='10px ui-monospace, monospace';x.textAlign='right';
+  const L=31,R=8,T=8,B=16,pw=w-L-R,ph=h-T-B,Y=v=>T+ph-(Math.min(100,Math.max(0,v))/100)*ph;
+  [0,25,50,75,100].forEach(v=>{x.strokeStyle=v===0?'#cbd1d9':'#e2e6eb';x.lineWidth=1;x.beginPath();x.moveTo(L,Y(v)+.5);x.lineTo(w-R,Y(v)+.5);x.stroke();if(v%50===0){x.fillStyle='#7a8392';x.fillText(v+'%',L-5,Y(v)+3)}});
+  if(!data.length)return;
+  const pts=data.map((v,i)=>[L+pw*(HIST-data.length+i)/(HIST-1),Y(v)]);
+  const fill=x.createLinearGradient(0,T,0,T+ph);fill.addColorStop(0,color+'33');fill.addColorStop(1,color+'04');
+  x.beginPath();pts.forEach((p,i)=>i?x.lineTo(...p):x.moveTo(...p));x.lineTo(pts.at(-1)[0],Y(0));x.lineTo(pts[0][0],Y(0));x.closePath();x.fillStyle=fill;x.fill();
+  x.beginPath();pts.forEach((p,i)=>i?x.lineTo(...p):x.moveTo(...p));x.strokeStyle=color;x.lineWidth=1.75;x.lineJoin='round';x.lineCap='round';x.stroke();
+  const last=pts.at(-1);x.fillStyle='#f5f7f9';x.beginPath();x.arc(...last,3.5,0,Math.PI*2);x.fill();x.fillStyle=color;x.beginPath();x.arc(...last,2,0,Math.PI*2);x.fill();
+}
+const charts=()=>{line($('c-cpu'),cpuH,'#2f5fd0');line($('c-mem'),memH,'#6b4fbb');$('c-cpu-label').textContent=`${(+sys.cpu_percent||0).toFixed(1)}% · last 2 min`;$('c-mem-label').textContent=`${(+sys.memory_percent||0).toFixed(1)}% · last 2 min`};
+const lvl=v=>v>85?'bad':v>65?'warn':'';
+
+/* render */
+function renderStats(){
+  const cpu=+sys.cpu_percent||0,mp=+sys.memory_percent||0;
+  const set=(id,t,c='')=>{$(id).textContent=t;$(id).className=c};
+  set('s-cpu',cpu.toFixed(1)+'%',lvl(cpu));
+  set('s-mem',mp.toFixed(0)+'%  '+fmtMb(+sys.memory_used_mb||0)+' / '+fmtMb(+sys.memory_total_mb||0),lvl(mp));
+  set('s-proc',procs.length);set('s-thr',procs.reduce((a,p)=>a+p.threads,0));set('s-al',alerts.length,alerts.length?'bad':'');
+}
+function renderStates(){
+  const c={running:0,sleeping:0,stopped:0,zombie:0};procs.forEach(p=>c[p.state]++);const t=procs.length||1;
+  $('stack').innerHTML=STATES.map(s=>`<i style="width:${c[s[0]]/t*100}%;background:${s[2]}"></i>`).join('');
+  $('lg').innerHTML=STATES.map(s=>`<div><i style="background:${s[2]}"></i>${s[1]}<b>${c[s[0]]}</b></div>`).join('');
+  $('seg').innerHTML=[['all','All',procs.length],...STATES.map(s=>[s[0],s[1],c[s[0]]])].map(f=>`<button data-f="${f[0]}" class="${filt===f[0]?'on':''}">${f[1]} (${f[2]})</button>`).join('');
+}
+const renderHead=()=>{$('thead').innerHTML=COLS.map(c=>`<th data-k="${c[0]}" class="${c[2]||''}">${c[1]}${sortK===c[0]?(sortD<0?' ▾':' ▴'):''}</th>`).join('')};
+function renderTable(){
+  const q=$('q').value.trim().toLowerCase();
+  const rows=procs.filter(p=>(filt==='all'||p.state===filt)&&(!q||`${p.pid} ${p.name} ${p.user} ${p.cmd}`.toLowerCase().includes(q)));
+  rows.sort((a,b)=>{const x=a[sortK],y=b[sortK];return(typeof x==='number'&&typeof y==='number'?x-y:String(x).localeCompare(String(y),undefined,{numeric:true}))*sortD});
+  $('shown').textContent=`${Math.min(rows.length,300)} of ${procs.length}`;
+  const col=Object.fromEntries(STATES.map(s=>[s[0],s[2]]));
+  $('tb').innerHTML=rows.slice(0,300).map(p=>{const cc=p.cpu>80?'hi':p.cpu>50?'md':'';
+    return`<tr class="p ${sel===p.pid?'sel':''}" data-pid="${p.pid}"><td class="mono">${p.pid}</td><td class="mono">${p.ppid}</td><td class="n">${esc(p.name)}</td><td>${esc(p.user)}</td>
+    <td><span class="s"><i style="background:${col[p.state]}"></i>${cap(p.state)}</span></td><td class="mono r">${p.nice}</td><td class="mono r">${p.threads}</td>
+    <td class="mono r ${cc}"><span class="bg"><i style="width:${Math.min(100,p.cpu)}%"></i></span>${p.cpu.toFixed(1)}</td><td class="mono r">${fmtMb(p.mem)}</td></tr>`}).join('')
+    ||'<tr><td colspan="9" class="empty">No matching processes</td></tr>';
+}
+function renderPcb(){
+  const p=procs.find(x=>x.pid===sel);
+  if(!p){$('pcb').innerHTML=`<div class="empty">${sel?'Process '+sel+' has exited':'Select a process to view its PCB'}</div>`;$('pcb-tag').textContent='';return}
+  $('pcb-tag').textContent='PID '+p.pid;
+  const kv=(a,b,f='')=>`<div class="kv ${f}"><span>${a}</span><span>${b}</span></div>`;
+  $('pcb').innerHTML='<div class="kvg">'+kv('Name',esc(p.name))+kv('Parent PID',p.ppid)+kv('Owner',esc(p.user))+kv('State',cap(p.state))
+   +kv('Priority (nice)',p.nice)+kv('Threads',p.threads)+kv('CPU',p.cpu.toFixed(1)+'%')+kv('Memory',fmtMb(p.mem)+(p.memp?' · '+p.memp.toFixed(1)+'%':''))
+   +kv('Command',`<code class="mono" title="${esc(p.cmd)}">${esc(p.cmd)}</code>`,'full')+'</div>'
+   +`<div class="acts"><button data-a="suspend">Suspend · SIGSTOP</button><button data-a="resume">Resume · SIGCONT</button><button class="d" data-a="terminate">Terminate · SIGTERM</button><button class="d" data-a="kill">Kill · SIGKILL</button></div>`;
+}
+function renderAlerts(){
+  alerts=[];
+  if((+sys.cpu_percent||0)>85)alerts.push(['bad','System CPU above 85%']);
+  if((+sys.memory_percent||0)>85)alerts.push(['bad','System memory above 85%']);
+  procs.forEach(p=>{const t=`${p.name} (${p.pid})`;
+    if(p.state==='zombie')alerts.push(['bad','Zombie: '+t,'parent '+p.ppid+' has not called wait()']);
+    else if(p.cpu>80)alerts.push(['bad','High CPU: '+t,p.cpu.toFixed(0)+'%']);
+    else if(p.cpu>50)alerts.push(['warn','Elevated CPU: '+t,p.cpu.toFixed(0)+'%']);
+    if(p.state==='stopped')alerts.push(['warn','Stopped: '+t]);
+    if(p.memp>25)alerts.push(['warn','High memory: '+t,p.memp.toFixed(0)+'%']);});
+  const col={bad:'var(--bad)',warn:'var(--warn)'};
+  $('alerts').innerHTML=alerts.map(a=>`<div class="it"><i style="background:${col[a[0]]}"></i><div>${esc(a[1])}<small>${esc(a[2]||'')}</small></div></div>`).join('')||'<div class="empty">No issues detected</div>';
+  $('al-n').textContent=alerts.length;
+  const now=new Set(alerts.map(a=>a[1]));now.forEach(k=>{if(!flagged.has(k))log(k)});flagged=now;
+}
+function log(m){$('last').textContent=new Date().toLocaleTimeString('en-GB')+'  '+m}
+function toast(m){const t=$('toast');t.textContent=m;t.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('on'),2500)}
+
+/* data loop */
+async function poll(){
+  if(paused)return;
+  let d;
+  try{const r=await fetch(API,{cache:'no-store'});d=await r.json();if(!r.ok||d.error)throw 0;
+    if(demo){demo=false;log('Backend connected')}$('conn').textContent='Live · '+rate/1000+' s refresh'}
+  catch(e){if(!demo){demo=true;log('Backend unreachable, using simulated data')}d=demoTick();$('conn').textContent='Simulated data · '+rate/1000+' s refresh'}
+  sys=d.system||{};procs=(d.processes||[]).map(norm);
+  cpuH.push(+sys.cpu_percent||0);memH.push(+sys.memory_percent||0);if(cpuH.length>HIST)cpuH.shift();if(memH.length>HIST)memH.shift();
+  renderAlerts();renderStats();renderStates();renderTable();renderPcb();charts();
+  timer=setTimeout(poll,rate);
+}
+async function act(a){
+  const p=procs.find(x=>x.pid===sel);if(!p)return;
+  const sig={terminate:'SIGTERM',kill:'SIGKILL',suspend:'SIGSTOP',resume:'SIGCONT'}[a];
+  if((a==='kill'||a==='terminate')&&!confirm(`Send ${sig} to ${p.name} (PID ${p.pid})?`))return;
+  try{
+    if(demo){const t=dm.find(x=>x.pid===p.pid);if(a==='kill'||a==='terminate')dm=dm.filter(x=>x!==t);else t.status=a==='suspend'?'stopped':'running'}
+    else{const fd=new FormData();fd.append('pid',p.pid);fd.append('action',a);const r=await fetch(ACT,{method:'POST',body:fd});const j=await r.json().catch(()=>({}));if(!r.ok||j.error)throw new Error(j.message||j.error||'HTTP '+r.status)}
+    log(`${sig} sent to ${p.name} (${p.pid})`);toast(`${sig} sent to PID ${p.pid}`);clearTimeout(timer);poll();
+  }catch(e){log(`${sig} failed on PID ${p.pid}: ${e.message}`);toast('Action failed: '+e.message)}
+}
+
+/* events */
+$('tb').onclick=e=>{const r=e.target.closest('[data-pid]');if(r){sel=+r.dataset.pid;renderTable();renderPcb()}};
+$('thead').onclick=e=>{const t=e.target.closest('[data-k]');if(!t)return;const k=t.dataset.k;sortD=sortK===k?-sortD:(['name','user','state'].includes(k)?1:-1);sortK=k;renderHead();renderTable()};
+$('seg').onclick=e=>{const b=e.target.closest('[data-f]');if(b){filt=b.dataset.f;renderStates();renderTable()}};
+$('pcb').onclick=e=>{const b=e.target.closest('[data-a]');if(b)act(b.dataset.a)};
+$('q').oninput=renderTable;
+$('rate').onchange=e=>{rate=+e.target.value;clearTimeout(timer);poll()};
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Resume':'Pause';if(paused)clearTimeout(timer);else poll();log(paused?'Updates paused':'Updates resumed')};
+$('v-reload').onclick=()=>{$('vf').src=VNC_URL;log('Remote console reloaded')};
+$('v-tab').onclick=()=>{window.open(VNC_URL,'_blank','noopener');log('KasmVNC opened in new tab')};
+$('v-fs').onclick=()=>$('vf').requestFullscreen?.();
+function makeResizable(handle,axis){
+  handle.addEventListener('pointerdown',e=>{
+    e.preventDefault();handle.setPointerCapture(e.pointerId);handle.classList.add('dragging');
+    document.body.classList.add('resizing',axis==='x'?'resizing-col':'resizing-row');
+    const app=$('app'),left=$('left');
+    const move=event=>{
+      if(axis==='x'){
+        const bounds=app.getBoundingClientRect();
+        const width=Math.max(420,Math.min(event.clientX-bounds.left,bounds.width-308));
+        document.documentElement.style.setProperty('--left-pane',`${width}px`);
+        localStorage.setItem('dashboard-left-pane',width);
+      }else{
+        const bounds=left.getBoundingClientRect();
+        const height=Math.max(160,Math.min(event.clientY-bounds.top,bounds.height-168));
+        document.documentElement.style.setProperty('--vnc-pane',`${height}px`);
+        localStorage.setItem('dashboard-vnc-pane',height);
+      }
+      charts();
+    };
+    const stop=()=>{
+      handle.classList.remove('dragging');document.body.classList.remove('resizing','resizing-col','resizing-row');
+      handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',stop);handle.removeEventListener('pointercancel',stop);
+    };
+    handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',stop);handle.addEventListener('pointercancel',stop);
+  });
+}
+const savedLeft=+localStorage.getItem('dashboard-left-pane'),savedVnc=+localStorage.getItem('dashboard-vnc-pane');
+if(savedLeft)document.documentElement.style.setProperty('--left-pane',`${savedLeft}px`);
+if(savedVnc)document.documentElement.style.setProperty('--vnc-pane',`${savedVnc}px`);
+makeResizable($('main-resizer'),'x');makeResizable($('vnc-resizer'),'y');
+function makeSidebarResizable(handle){
+  handle.addEventListener('pointerdown',e=>{
+    e.preventDefault();handle.setPointerCapture(e.pointerId);handle.classList.add('dragging');document.body.classList.add('resizing','resizing-row');
+    const pcb=$('pcb-box'),issues=$('iss');
+    const move=event=>{
+      const bounds=pcb.getBoundingClientRect(),issueBounds=issues.getBoundingClientRect();
+      const height=Math.max(120,Math.min(event.clientY-bounds.top,bounds.height+issueBounds.height-148));
+      document.documentElement.style.setProperty('--pcb-pane',`${height}px`);localStorage.setItem('dashboard-pcb-pane',height);
+    };
+    const stop=()=>{handle.classList.remove('dragging');document.body.classList.remove('resizing','resizing-row');handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',stop);handle.removeEventListener('pointercancel',stop)};
+    handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',stop);handle.addEventListener('pointercancel',stop);
+  });
+}
+const savedPcb=+localStorage.getItem('dashboard-pcb-pane');if(savedPcb)document.documentElement.style.setProperty('--pcb-pane',`${savedPcb}px`);
+makeSidebarResizable($('side-resizer'));
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('q').focus()}});
+addEventListener('resize',charts);
+setInterval(()=>$('clock').textContent=new Date().toLocaleTimeString('en-GB'),1000);
+
+try{$('vnc-host').textContent=new URL(VNC_URL).host}catch(e){}
+$('vf').src=VNC_URL;
+renderHead();renderPcb();poll();
+})();
+</script>
+</body>
+</html>
